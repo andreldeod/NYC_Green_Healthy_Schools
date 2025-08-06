@@ -337,9 +337,16 @@ pts_dac = pts_df[pts_df["DAC_Desig"] == DAC_FLAG]
 pts_nd = pts_df[pts_df["DAC_Desig"] != DAC_FLAG]
 counties = sorted([c for c in pts_df["County"].dropna().unique()])
 
+# Precompute numeric arrays for fast reuse
+NUM_CACHE = {
+    f: (pts_nd[f].to_numpy(), pts_dac[f].to_numpy())
+    for f in DAC_NUM_FIELDS if f in pts_df.columns
+}
+
 # Color palette per county (stable mapping)
 pal = px.colors.qualitative.Plotly
 county_color = {c: pal[i % len(pal)] for i, c in enumerate(counties)}
+
 
 # Friendly helpers
 def _county_label(c):
@@ -434,8 +441,10 @@ if pts_dac["County"].isna().any():
 # 2c) NUMERIC mode: two traces share one coloraxis + colorbar
 # Pick a default numeric field
 default_num = next((f for f in DAC_NUM_FIELDS if f in pts_df), "Pop_Cnt")
-vals_dac = pd.to_numeric(pts_dac.get(default_num), errors="coerce")
-vals_nd = pd.to_numeric(pts_nd.get(default_num), errors="coerce")
+vals_nd, vals_dac = NUM_CACHE.get(
+    default_num,
+    (pts_nd[default_num].to_numpy(), pts_dac[default_num].to_numpy())
+)
 
 fig.add_trace(go.Scattermap(
     lon=pts_nd["lon"], lat=pts_nd["lat"], mode="markers",
@@ -605,12 +614,23 @@ def update_map(layers, points_mode, dac_subset, relayout, cur_fig):
     # Patch object
     patch = Patch()
 
-    # 1) Polygons visibility (no re-adding)
+    # 1) Polygons visibility — only touch if the value actually changed.
     show_poly = "poly" in layers
+
+    # Read current visibility from the incoming figure so we don't reorder layers
+    cur_vis = {}
+    if isinstance(cur_fig, dict) and "data" in cur_fig:
+        for pid in ("POLY_DAC", "POLY_NODAC"):
+            idx0 = ID_IDX.get(pid)
+            if idx0 is not None and idx0 < len(cur_fig["data"]):
+                cur_vis[pid] = cur_fig["data"][idx0].get("visible", True)
+
     for pid in ("POLY_DAC", "POLY_NODAC"):
         idx = ID_IDX.get(pid)
         if idx is not None:
-            patch["data"][idx]["visible"] = show_poly
+            if cur_vis.get(pid) != show_poly:
+                patch["data"][idx]["visible"] = show_poly
+
 
     # 2) Points visibility groups
     show_pts = "pts" in layers
@@ -662,14 +682,13 @@ def update_map(layers, points_mode, dac_subset, relayout, cur_fig):
         elif points_mode in DAC_NUM_FIELDS:
             # Update numeric color arrays only (fast)
             patch["layout"]["coloraxis"]["colorbar"]["title"] = points_mode
-            # Recompute values (no coords resend)
-            vals_nd = pd.to_numeric(
-                pts_nd.get(points_mode), errors="coerce"
-            )
-            vals_d = pd.to_numeric(
-                pts_dac.get(points_mode), errors="coerce"
+            # Reuse precomputed arrays (fallback if missing)
+            vals_nd, vals_d = NUM_CACHE.get(
+                points_mode,
+                (pts_nd[points_mode].to_numpy(), pts_dac[points_mode].to_numpy())
             )
             idx_nd = ID_IDX.get("PT_NUM_ND")
+
             idx_d = ID_IDX.get("PT_NUM_DAC")
             if idx_nd is not None:
                 patch["data"][idx_nd]["marker"]["color"] = vals_nd
@@ -817,6 +836,7 @@ def show_polygon_attributes(click, points_mode, dac_subset):
 
 # --------------------------- Main ------------------------------------------ #
 if __name__ == "__main__":
+    # Local development only. Render uses gunicorn to run `app:server`.
     # Print startup time
     dt = time.time() - t0  # seconds
     hrs = int(dt // 3600)  # hours
