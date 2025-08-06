@@ -33,19 +33,14 @@ import geopandas as gpd  # read shapefiles
 import pandas as pd  # tabular ops
 import numpy as np  # arrays
 import json  # to make proper GeoJSON
+from pathlib import Path
 
 
 # --------------------------- User Variables -------------------------------- #
-# Paths to shapefiles (use raw strings on Windows)
-POINTS_SHP = (
-    r"D:\André\Ecosoc\data\SchoolPoints_APS_2024_08_28"
-    r"\SchoolPoints_APS_2024_08_28.shp"
-)
-
-POLY_SHP = (
-    r"D:\André\Ecosoc\data\20230322_NYSERDA_Final_Disadvantaged_Communities_"
-    r"Shapefile\DAC_NYC.shp"
-)
+# Paths to layers
+BASE_DIR = Path(__file__).resolve().parent
+SCHOOLS_PTS_PATH = BASE_DIR / "data" / "SchoolPoints_APS_2024_08_28.geojson"
+DAC_POLY_PATH   = BASE_DIR / "data" / "DAC_NYC.geojson"
 
 # Map style that needs no token
 MAP_STYLE = "open-street-map"
@@ -76,10 +71,10 @@ DAC_NUM_FIELDS = [
 
 # --------------------------- Data Loading ---------------------------------- #
 # Read polygon shapefile
-gdf_poly = gpd.read_file(POLY_SHP)  # load polygons
+gdf_poly = gpd.read_file(DAC_POLY_PATH)  # load polygons
 
 # Read point shapefile
-gdf_pts = gpd.read_file(POINTS_SHP)  # load points
+gdf_pts = gpd.read_file(SCHOOLS_PTS_PATH)  # load points
 
 # Reproject to WGS84 if needed
 if gdf_poly.crs is None or gdf_poly.crs.to_epsg() != 4326:
@@ -487,6 +482,7 @@ ID_IDX = {getattr(tr, "meta", {}).get("id"): i for i, tr in
 # --------------------------- App Layout ------------------------------------ #
 # Create Dash app
 app = Dash(__name__)  # app
+server = app.server   # <-- required for Render/Gunicorn
 
 # Build options for points mode dropdown
 points_mode_options = (
